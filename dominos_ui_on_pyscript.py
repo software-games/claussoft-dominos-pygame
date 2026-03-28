@@ -268,7 +268,8 @@ def _render_play_area():
     area = document.getElementById("play-area")
     area.innerHTML = ""
     for tile in _chain:
-        div = _make_tile_div(tile[0], tile[1])
+        is_double = tile[0] == tile[1]
+        div = _make_tile_div(tile[0], tile[1], horizontal=not is_double)
         area.appendChild(div)
 
 
@@ -440,7 +441,7 @@ body {
 h1 { font-size: 1.1rem; letter-spacing: 2px; }
 #board {
     display: grid;
-    grid-template-columns: 200px 1fr 90px;
+    grid-template-columns: 130px 1fr 90px;
     grid-template-rows: auto 1fr auto;
     gap: 6px;
     width: 100%;
@@ -461,8 +462,7 @@ h1 { font-size: 1.1rem; letter-spacing: 2px; }
 }
 #boneyard-area {
     display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 3px;
     background: rgba(0,0,0,.4);
     border-radius: 8px;
@@ -475,12 +475,12 @@ h1 { font-size: 1.1rem; letter-spacing: 2px; }
     border: 2px dashed rgba(255,255,255,.4);
     border-radius: 8px;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: row;
+    flex-wrap: nowrap;
     gap: 4px;
     padding: 8px;
-    align-content: flex-start;
-    justify-content: space-evenly;
-    overflow-y: auto;
+    align-items: center;
+    overflow-x: auto;
 }
 #scoreboard {
     display: flex;
