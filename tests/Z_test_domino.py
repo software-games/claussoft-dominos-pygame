@@ -15,6 +15,7 @@ def test_domino_rotate_90() -> None:
     domino.rotate_90()
     assert domino.rotation == 0
 
+
 def test_domino_rotate_180() -> None:
     domino = Domino()
     assert domino.rotation == 0
@@ -22,6 +23,7 @@ def test_domino_rotate_180() -> None:
     assert domino.rotation == pi
     domino.rotate_180()
     assert domino.rotation == 0
+
 
 def test_domino_reset() -> None:
     domino = Domino()
@@ -33,6 +35,7 @@ def test_domino_reset() -> None:
     assert domino.rotation == pi
     domino.reset()
     assert domino.rotation == 0
+
 
 def test_domino_horizontal() -> None:
     domino = Domino()

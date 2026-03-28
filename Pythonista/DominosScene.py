@@ -67,7 +67,7 @@ class MyScene(scene.Scene):
         top = (self.bounds.h - bufferSize * maxDie) // 7
         w = dieSize * 2
         h = dieSize
-        for (i, j) in generateDominosYield(maxDie):
+        for i, j in generateDominosYield(maxDie):
             theDomino = self.make_domino(pips=(i, j), die_size=dieSize)
             theDomino.position = (
                 j * (w + bufferSize) + dieSize,

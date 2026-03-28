@@ -47,7 +47,7 @@ class ColoredLayer(scene.ShapeNode):  # scene.Layer):
             position=(x, y),
             stroke_color="gold",
             *args,
-            **kwargs
+            **kwargs,
         )
         print(f"{self.__class__.__name__} {fill_color=} {x=}, ({y=}, {w=}, {h=})")
         # self.position = inParent.bounds.center()
@@ -126,9 +126,7 @@ class PegboardView(ColoredLayer):
 
     def square_rect(self, x, y):
         ss = self.square_size
-        return self.inset_rect(
-            scene.Rect(self.frame.x + x * ss, self.frame.y + y * ss, ss, ss)
-        )
+        return self.inset_rect(scene.Rect(self.frame.x + x * ss, self.frame.y + y * ss, ss, ss))
 
     def draw(self, a=1):
         super(self.__class__, self).draw(a)
@@ -289,9 +287,7 @@ class DominoBoardView(scene.Scene):
 
         # bottomOfPlayArea = h * deltaH - 2
         # bottomOfPlayArea = self.bounds.h - 2 * deltaH
-        playAreaRect = scene.Rect(
-            w, h, w * (deltaW - 2), h * (deltaH - 2)
-        )  # bottomOfPlayArea)
+        playAreaRect = scene.Rect(w, h, w * (deltaW - 2), h * (deltaH - 2))  # bottomOfPlayArea)
         # frame = (w, h, w * (deltaW - 2), bottomOfPlayArea)
         self.playAreaView = PlayAreaView(playAreaRect, self)
         # print('bopa, par: {}, {}'.format(bottomOfPlayArea, playAreaRect))
@@ -307,9 +303,7 @@ class DominoBoardView(scene.Scene):
         # computerRect = scene.Rect(w, h * (deltaH - 1), playAreaRect.w, h)
         computerRect = scene.Rect(w, self.bounds.h - h, playAreaRect.w, h)
         computerPlayer = self.dominoWorld.getPlayer(1)  # DummyPlayer()
-        self.computerView = PlayerHandView(
-            computerRect, self, computerPlayer, colorComputer
-        )
+        self.computerView = PlayerHandView(computerRect, self, computerPlayer, colorComputer)
 
         humanRect = scene.Rect(w, 0, playAreaRect.w, h)
         humanPlayer = self.dominoWorld.getPlayer(0)  # DummyPlayer()
@@ -321,9 +315,7 @@ class DominoBoardView(scene.Scene):
     def makeDictOfDominoViews(self):
         theDict = {}  # dict()
         for theDomino in self.dominoWorld.mDominos:
-            domino = Domino(
-                pips=theDomino, die_size=self.dieWidth, parent=self.humanView
-            )
+            domino = Domino(pips=theDomino, die_size=self.dieWidth, parent=self.humanView)
             theDict[tuple(theDomino)] = domino
             # dominoLayer = DominoView.DominoLayer(theDomino, self.dieWidth)
             # self.humanView.add_layer(dominoLayer) # add to the (0, 0) layer and move later
@@ -336,9 +328,7 @@ class DominoBoardView(scene.Scene):
     def getViewFromPlayed(self, inPlayedDomino):
         if not inPlayedDomino.mDominoView:  # if it is not set then set it
             # inPlayedDomino.mDominoView = self.getDominoView(inPlayedDomino.getValues())
-            inPlayedDomino.setDominoView(
-                self.getDominoView(inPlayedDomino.pips)
-            )  # getValues()))
+            inPlayedDomino.setDominoView(self.getDominoView(inPlayedDomino.pips))  # getValues()))
         return inPlayedDomino.mDominoView  # and return it
 
     def getPlayedDominos(self):

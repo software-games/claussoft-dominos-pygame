@@ -52,26 +52,14 @@ def domino_image(pips=(5, 6), die_size=70, fg_color="blue", bg_color="grey"):
         for loc in pip_locs[pips[1]]:
             if loc:
                 x, y = loc
-                ui.Path.oval(
-                    x * pip_size + b + die_size, y * pip_size + b, wh, wh
-                ).fill()
+                ui.Path.oval(x * pip_size + b + die_size, y * pip_size + b, wh, wh).fill()
         return scene.Texture(ctx.get_image())
 
 
 class Domino(scene.SpriteNode):
-    def __init__(
-        self,
-        pips=(5, 6),
-        die_size=70,
-        fg_color="blue",
-        bg_color="silver",
-        *args,
-        **kwargs
-    ):
+    def __init__(self, pips=(5, 6), die_size=70, fg_color="blue", bg_color="silver", *args, **kwargs):
         assert len(pips) == 2, "Need two pips!"  # noqa: S101
-        image = domino_image(
-            pips=pips, die_size=die_size, fg_color=fg_color, bg_color=bg_color
-        )
+        image = domino_image(pips=pips, die_size=die_size, fg_color=fg_color, bg_color=bg_color)
         # print(image, pips)
         super().__init__(image, *args, **kwargs)
         self.pips = pips
@@ -95,9 +83,7 @@ class Domino(scene.SpriteNode):
         return not self.rotation % scene.math.pi
 
     def __str__(self):
-        return (
-            f"Domino({self.pip=}), {self.rotation=}, {self.horizontal=}, {self.frame=}"
-        )
+        return f"Domino({self.pip=}), {self.rotation=}, {self.horizontal=}, {self.frame=}"
 
 
 if __name__ == "__main__":
