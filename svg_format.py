@@ -53,7 +53,7 @@ def main() -> None:
         if not svg_dir.is_dir():
             print(f"Directory not found: {svg_dir}", file=sys.stderr)
             sys.exit(1)
-        paths = sorted(svg_dir.glob("*.svg"))
+        paths = sorted(svg_dir.glob("*.svg")) + sorted(svg_dir.glob("*.txt"))
         if not paths:
             print(f"No SVG files found in {svg_dir}", file=sys.stderr)
             sys.exit(1)

@@ -1,7 +1,6 @@
 [tool.ruff]
 target-version = "py39"
 line-length = 108
-
 lint.select = [
   "A",     # flake8-builtins
   "AIR",   # Airflow
@@ -18,7 +17,7 @@ lint.select = [
   "EXE",   # flake8-executable
   "F",     # Pyflakes
   "FA",    # flake8-future-annotations
-  "FAST",   # FastAPI
+  "FAST",  # FastAPI
   "FBT",   # flake8-boolean-trap
   "FIX",   # flake8-fixme
   "FLY",   # flynt
@@ -66,7 +65,10 @@ lint.select = [
 ]
 # ignore = []
 lint.per-file-ignores."__init__.py" = [ "E402" ]
-lint.per-file-ignores."Pythonista/BoardView.py" = [ "B026" ]
 lint.per-file-ignores."dominos_svg.py" = [ "S101" ]
+lint.per-file-ignores."Pythonista/BoardView.py" = [ "B026" ]
 lint.per-file-ignores."tests/*" = [ "S101" ]
 lint.pylint.allow-magic-value-types = [ "int", "str" ]
+
+[tool.codespell]
+ignore-words-list = "agains"

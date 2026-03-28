@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+"""
+BoardView.py
+"""
+
 import scene
 
 # from player import DominoPlayer, DominoRunMove
@@ -17,18 +21,16 @@ colorCyan = colorPegboard = "cyan"  # (0, 1, 1, 1)
 colorYellow = colorUnused = "yellow"  # (1, 1, 0, 1)
 colorMagenta = colorBoneyard = "magenta"  # (1, 0, 1, 1)
 
-"""
-DominoBoardView object at 0x10f051f98>: (0.00, 0.00, 1024.00, 768.00)
-PlayAreaView object at 0x10e6fe5f8>: (102.00, 96.00, 816.00, 752.00), (510.00, 472.00)
-StatusView object at 0x10e6fee10>: (0.00, 702.00, 816.00, 50.00), (408.00, 727.00)
-BoneyardView object at 0x10f1741d0>: (0.00, 0.00, 102.00, 768.00), (51.00, 384.00)
-PegboardView object at 0x10f1744e0>: (918.00, 0.00, 102.00, 694.00), (969.00, 347.00)
-ScoreboardView object at 0x10f174dd8>: (0.00, 650.62, 108.44, 50.00), (54.22, 675.62)
-TextView object at 0x10f1740b8>: (0.00, 0.00, 54.22, 50.00), (27.11, 25.00)
-TextView object at 0x10f174048>: (54.22, 0.00, 54.22, 50.00), (81.33, 25.00)
-PlayerHandView object at 0x10f1749e8>: (102.00, 672.00, 816.00, 96.00), (510.00,720.00)
-PlayerHandView object at 0x10f174128>: (102.00, 0.00, 816.00, 96.00), (510.00, 48.00)
-"""
+# DominoBoardView object at 0x10f051f98>: (0.00, 0.00, 1024.00, 768.00)
+# PlayAreaView object at 0x10e6fe5f8>: (102.00, 96.00, 816.00, 752.00), (510.00, 472.00)
+# StatusView object at 0x10e6fee10>: (0.00, 702.00, 816.00, 50.00), (408.00, 727.00)
+# BoneyardView object at 0x10f1741d0>: (0.00, 0.00, 102.00, 768.00), (51.00, 384.00)
+# PegboardView object at 0x10f1744e0>: (918.00, 0.00, 102.00, 694.00), (969.00, 347.00)
+# ScoreboardView object at 0x10f174dd8>: (0.00, 650.62, 108.44, 50.00), (54.22, 675.62)
+# TextView object at 0x10f1740b8>: (0.00, 0.00, 54.22, 50.00), (27.11, 25.00)
+# TextView object at 0x10f174048>: (54.22, 0.00, 54.22, 50.00), (81.33, 25.00)
+# PlayerHandView object at 0x10f1749e8>: (102.00, 672.00, 816.00, 96.00), (510.00,720.00)
+# PlayerHandView object at 0x10f174128>: (102.00, 0.00, 816.00, 96.00), (510.00, 48.00)
 
 
 def DominoRunMove():

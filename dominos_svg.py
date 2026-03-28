@@ -22,13 +22,13 @@ domino.  Images are 200x400 pixels with the pips (dots) being 5.5% of the domino
 """
 
 # python3 ./dominoes_svg.py && open dominoes_svg/*
-#from pyscript import display
-#import pyodide
-#display(dir(pyodide))
-#asyncio.run(pyodide.load_package("micropip"))
+# from pyscript import display
+# import pyodide
+# display(dir(pyodide))
+# asyncio.run(pyodide.load_package("micropip"))
 # micropip = pyodide.pyimport("micropip")
-#import micropip
-#asyncio.run(micropip.install("svgwrite"))
+# import micropip
+# asyncio.run(micropip.install("svgwrite"))
 
 # import pyodide_js
 # asyncio.run(pyodide_js.loadPackage('svgwrite'))
@@ -86,7 +86,7 @@ def dominoes_svg(width_in_px=200):
     for i in range(7):
         for j in range(i, 7):
             filename = f"dominoes_svg/domino_{i}_{j}.txt"
-            size = (f"{width_in_px+x}px", f"{width_in_px*2+y}px")
+            size = (f"{width_in_px + x}px", f"{width_in_px * 2 + y}px")
             svg = svgwrite.Drawing(filename=filename, size=size)
             svg_domino(svg, (i, j), width_in_px)
             svg.save()
