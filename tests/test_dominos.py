@@ -312,3 +312,37 @@ def test_html_uniform_branch_gap() -> None:
     assert branch_start != -1
     branch_block = html[branch_start : branch_start + 120]
     assert "gap: 4px" in branch_block
+
+
+def test_pyscript_last_bone_double_must_draw_and_continue() -> None:
+    """If a player empties their hand with a double, they must draw and keep playing."""
+    # Extract just the _after_play function body for scoped assertions.
+    after_play_start = _PYSCRIPT_CODE.find("def _after_play(")
+    assert after_play_start != -1
+    # End at the next top-level function definition.
+    next_def = _PYSCRIPT_CODE.find("\ndef _", after_play_start + 1)
+    after_play_body = _PYSCRIPT_CODE[after_play_start:next_def]
+    # The rule: last bone is double → draw from boneyard and continue, not win hand.
+    assert "Must draw and keep playing." in after_play_body
+    # The check must guard against boneyard being at minimum.
+    assert "(scored or is_dbl) and len(_boneyard) > _BONEYARD_MIN" in after_play_body
+    # Hand-empty check must come AFTER scoring (not before), so pts are always counted.
+    pts_pos = after_play_body.find("pts = _score_chain()")
+    not_hand_pos = after_play_body.find("if not hand:")
+    assert pts_pos != -1, "pts = _score_chain() must be in _after_play"
+    assert not_hand_pos != -1, "if not hand: must be in _after_play"
+    assert pts_pos < not_hand_pos, "Scoring must happen before the empty-hand check"
+
+
+def test_pyscript_last_bone_score_must_draw_and_continue() -> None:
+    """If a player empties their hand with a scoring play, they must draw and keep playing."""
+    # Extract just the _after_play function body for scoped assertions.
+    after_play_start = _PYSCRIPT_CODE.find("def _after_play(")
+    assert after_play_start != -1
+    next_def = _PYSCRIPT_CODE.find("\ndef _", after_play_start + 1)
+    after_play_body = _PYSCRIPT_CODE[after_play_start:next_def]
+    # Three cases: double+scored, double-only, score-only - all must trigger draw rule.
+    assert "with their last bone! Must draw and keep playing." in after_play_body
+    assert "played their last bone (a double)!" in after_play_body
+    # When boneyard is at minimum or last bone is plain non-scoring, call check_win instead.
+    assert "_check_win_after_play(player_idx)" in after_play_body

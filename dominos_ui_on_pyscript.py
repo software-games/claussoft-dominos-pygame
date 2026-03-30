@@ -858,14 +858,36 @@ def _after_play(player_idx, bone_played):
     global _consecutive_passes
     _consecutive_passes = 0
     hand = _hand0 if player_idx == 0 else _hand1
-    if not hand:
-        _check_win_after_play(player_idx)
-        return
     pts = _score_chain()
     scored = pts > 0
     is_dbl = _is_double(bone_played)
     if scored:
         _scores[player_idx] += pts // _SCORING_DIVISOR
+    if not hand:
+        # Player emptied their hand. Per racehorse rules: if the last bone was a double
+        # or scored, the player must draw from the boneyard and keep playing.
+        if (scored or is_dbl) and len(_boneyard) > _BONEYARD_MIN:
+            player_name = "You" if player_idx == 0 else "Computer"
+            if is_dbl and scored:
+                prefix = (
+                    f"{player_name} played a double and scored "
+                    f"{pts // _SCORING_DIVISOR} pt(s) with their last bone! "
+                    f"Must draw and keep playing. "
+                )
+            elif is_dbl:
+                prefix = (
+                    f"{player_name} played their last bone (a double)! "
+                    f"Must draw and keep playing. "
+                )
+            else:
+                prefix = (
+                    f"{player_name} scored {pts // _SCORING_DIVISOR} pt(s) "
+                    f"with their last bone! Must draw and keep playing. "
+                )
+            _start_turn(player_idx, prefix=prefix)
+        else:
+            _check_win_after_play(player_idx)
+        return
     if scored or is_dbl:
         if is_dbl and scored:
             prefix = (
