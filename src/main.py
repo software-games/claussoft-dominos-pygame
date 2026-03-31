@@ -73,7 +73,7 @@ def _load_domino_image_uris() -> dict[str, str]:
     Keys are of the form "a_b" where a <= b (e.g. "3_4" for the [3,4] domino).
     Values are data URIs suitable for use as SVG <image href="...">.
     """
-    imgs_dir = Path(__file__).parent / "images" / "dominoes_faceup"
+    imgs_dir = Path(__file__).parent.parent / "images" / "dominoes_faceup"
     uris: dict[str, str] = {}
     for i in range(7):
         for j in range(i, 7):
@@ -93,7 +93,7 @@ def _load_facedown_image_uri() -> str:
     generated HTML stays fast to load.  Returns an empty string if Pillow is not
     installed or no image file is found.
     """
-    facedown_dir = Path(__file__).parent / "images" / "dominoes_facedown"
+    facedown_dir = Path(__file__).parent.parent / "images" / "dominoes_facedown"
     try:
         from PIL import Image  # noqa: PLC0415
     except ImportError:
@@ -167,6 +167,7 @@ _SCORING_DIVISOR = 5      # racehorse: score a point for every 5 pips
 _WIN_SCORE = 30           # first player to reach this score wins the match
 _BONEYARD_MIN = 2         # must leave at least this many bones in boneyard
 _BONE_GAP_PX = 4          # uniform gap (px) between adjacent dominoes in every direction
+_COMPUTER_PLAY_DELAY_MS = 1200  # ms delay before computer plays
 
 
 def _domino_svg(top, bottom, w=55, face_down=False):
@@ -232,6 +233,172 @@ def _domino_svg_h(top, bottom, w=55, face_down=False):
 
 
 # ---------------------------------------------------------------------------
+# Board data structures
+# ---------------------------------------------------------------------------
+class PlayedDomino:
+    \"\"\"One placed domino; value[0] faces left/up, value[1] faces right/down.
+    Regular dominoes have at most 2 active neighbor slots (left + right).
+    Doubles expose all 4 slots once both horizontal sides are filled.
+    \"\"\"
+    def __init__(self, a, b):
+        self.value = [a, b]
+        self.left = None   # PlayedDomino | None
+        self.right = None  # PlayedDomino | None
+        self.up = None     # PlayedDomino | None (doubles only)
+        self.down = None   # PlayedDomino | None (doubles only)
+
+    @property
+    def is_double(self):
+        return self.value[0] == self.value[1]
+
+    def pip_at(self, direction):
+        \"\"\"Pip value exposed at the given direction.\"\"\"
+        if self.is_double:
+            return self.value[0]
+        return self.value[0] if direction in ("left", "up") else self.value[1]
+
+    def open_directions(self):
+        \"\"\"Directions where a new bone can be attached.\"\"\"
+        dirs = []
+        if self.left is None:
+            dirs.append("left")
+        if self.right is None:
+            dirs.append("right")
+        # Doubles expose up/down only after both horizontal sides are connected.
+        if self.is_double and self.left is not None and self.right is not None:
+            if self.up is None:
+                dirs.append("up")
+            if self.down is None:
+                dirs.append("down")
+        return dirs
+
+
+class PlayedDominoes:
+    \"\"\"Board state as a linked tree of PlayedDomino nodes.\"\"\"
+
+    def __init__(self):
+        self.first_played_domino = None   # PlayedDomino | None
+
+    def clear(self):
+        self.first_played_domino = None
+
+    def is_empty(self):
+        return self.first_played_domino is None
+
+    def all_bones(self):
+        \"\"\"BFS over all placed bones.\"\"\"
+        if not self.first_played_domino:
+            return []
+        result, stack, seen = [], [self.first_played_domino], set()
+        while stack:
+            b = stack.pop()
+            bid = id(b)
+            if bid in seen:
+                continue
+            seen.add(bid)
+            result.append(b)
+            for n in (b.left, b.right, b.up, b.down):
+                if n is not None and id(n) not in seen:
+                    stack.append(n)
+        return result
+
+    def horizontal_run(self):
+        \"\"\"Left-to-right spine of the board.\"\"\"
+        if not self.first_played_domino:
+            return []
+        cur = self.first_played_domino
+        while cur.left is not None:
+            cur = cur.left
+        run = []
+        while cur is not None:
+            run.append(cur)
+            cur = cur.right
+        return run
+
+    def open_ends(self):
+        \"\"\"All open attachment points: list of (PlayedDomino, direction) pairs.\"\"\"
+        return [(b, d) for b in self.all_bones() for d in b.open_directions()]
+
+    def playable_pips(self):
+        \"\"\"Set of pip values that can be played; None if board is empty.\"\"\"
+        if not self.first_played_domino:
+            return None
+        return {b.pip_at(d) for b, d in self.open_ends()}
+
+    def score(self):
+        \"\"\"Sum of all open-end pip values; doubles count twice per open end.\"\"\"
+        if not self.first_played_domino:
+            return 0
+        run = self.horizontal_run()
+        # Lone double (not yet surrounded): count both halves.
+        if len(run) == 1 and run[0].is_double and run[0].left is None and run[0].right is None:
+            return run[0].value[0] * 2
+        return sum(b.pip_at(d) * (2 if b.is_double else 1) for b, d in self.open_ends())
+
+    def can_play(self, a, b):
+        if not self.first_played_domino:
+            return True
+        pips = self.playable_pips()
+        return a in pips or b in pips
+
+    def play_options(self, a, b):
+        \"\"\"Valid (PlayedDomino, direction) pairs for placing bone [a, b].\"\"\"
+        if not self.first_played_domino:
+            return []
+        return [(bone, d) for bone, d in self.open_ends() if a == bone.pip_at(d) or b == bone.pip_at(d)]
+
+    def apply_play(self, a, b, target_bone=None, target_direction=None):
+        \"\"\"Place bone [a, b] onto the board. Returns the new PlayedDomino or None.\"\"\"
+        if not self.first_played_domino:
+            new_bone = PlayedDomino(a, b)
+            self.first_played_domino = new_bone
+            return new_bone
+        opts = self.play_options(a, b)
+        if not opts:
+            return None
+        if target_bone is not None and target_direction is not None:
+            if (target_bone, target_direction) not in opts:
+                return None
+            cb, cd = target_bone, target_direction
+        elif len(opts) == 1:
+            cb, cd = opts[0]
+        else:
+            return None  # ambiguous
+        pip_at = cb.pip_at(cd)
+        if cd in ("left", "up"):
+            new_bone = PlayedDomino(a, b) if b == pip_at else PlayedDomino(b, a)
+        else:
+            new_bone = PlayedDomino(a, b) if a == pip_at else PlayedDomino(b, a)
+        if cd == "left":
+            cb.left = new_bone
+            new_bone.right = cb
+        elif cd == "right":
+            cb.right = new_bone
+            new_bone.left = cb
+        elif cd == "up":
+            cb.up = new_bone
+            new_bone.down = cb
+        else:
+            cb.down = new_bone
+            new_bone.up = cb
+        return new_bone
+
+    def find_double_in_run(self, pip_val):
+        \"\"\"Find the double bone with the given pip value in the horizontal run.\"\"\"
+        for b in self.horizontal_run():
+            if b.is_double and b.value[0] == pip_val:
+                return b
+        return None
+
+    def find_tip(self, double_bone, direction):
+        \"\"\"Follow the chain from double_bone in direction, return the tip bone.\"\"\"
+        cur = double_bone
+        while getattr(cur, direction) is not None:
+            cur = getattr(cur, direction)
+        return cur
+
+
+# ---------------------------------------------------------------------------
 # Game state (mutable; starts from the JSON embedded by the host script)
 # ---------------------------------------------------------------------------
 _raw = json.loads(document.getElementById("game-state-data").textContent)
@@ -241,20 +408,13 @@ _boneyard = [list(t) for t in _raw["boneyard"]]
 # Load domino face-up SVG images and the face-down skin image embedded by the host
 _DOMINO_IMAGE_URIS = json.loads(document.getElementById("domino-image-uris").textContent)
 _FACEDOWN_IMAGE_URI = json.loads(document.getElementById("facedown-image-uri").textContent)
-_played_dominoes: list[list[int]] = []   # played dominoes, in play order
-_left_end: int | None = None   # open left end of the played dominoes
-_right_end: int | None = None  # open right end of the played dominoes
+_played_dominoes = PlayedDominoes()   # board state; PlayedDomino tree
 _scores = [0, 0]
 _current_player = 0            # 0 = human, 1 = computer
 _needs_boneyard_draw = False   # True when human must draw from boneyard
 _game_over = False             # True when the match has been won
 _consecutive_passes = 0        # tracks back-to-back passes; game stuck when >= 2
 _game_num = _raw.get("game_num", 0)  # how many hands dealt so far (first player alternates)
-_spinner_val = None            # pip value of first double placed (the spinner)
-_top_branch = []               # bones in the top branch above the spinner
-_bottom_branch = []            # bones in the bottom branch below the spinner
-_top_end = None                # open pip at the end of the top branch
-_bottom_end = None             # open pip at the end of the bottom branch
 
 
 # ---------------------------------------------------------------------------
@@ -312,10 +472,6 @@ def _render_boneyard(draggable_to_hand=False):
 
 def _apply_bone_rotation(div, w):
     # CSS-rotate the whole landscape bone 90° to appear portrait (perpendicular to chain).
-    # Margin compensation makes the element occupy portrait-sized space in the flex layout:
-    #   natural box: (2w+6) wide x (w+6) tall
-    #   after rotate: appears (w+6) wide x (2w+6) tall
-    #   delta = w -> shrink horizontal by w/2 each side, grow vertical by w/2 each side
     div.className += " bone-rotated"
     hw = w // 2
     div.style.marginTop = f"{hw}px"
@@ -324,69 +480,64 @@ def _apply_bone_rotation(div, w):
     div.style.marginRight = f"-{hw}px"
 
 
-def _render_played_linear(area, w):
-    for i, bone in enumerate(_played_dominoes):
-        is_double = bone[0] == bone[1]
-        # All bones use the landscape (horizontal) SVG.
-        # Doubles are CSS-rotated 90° so they appear portrait, perpendicular to the chain.
-        div = _make_bone_div(bone[0], bone[1], horizontal=True, w=w)
-        if is_double:
-            _apply_bone_rotation(div, w)
-        if i == 0 or i == len(_played_dominoes) - 1:
-            end_side = "left" if i == 0 else "right"
-            div.setAttribute("data-play-end", end_side)
-            div.addEventListener("dragover", ffi.create_proxy(_on_dragover))
-            div.addEventListener("drop", ffi.create_proxy(_on_drop_played_bone))
-        area.appendChild(div)
+def _get_branch_chain(double_bone, direction):
+    \"\"\"Return the list of bones in the up or down chain from double_bone.\"\"\"
+    chain = []
+    cur = getattr(double_bone, direction)
+    while cur is not None:
+        chain.append(cur)
+        cur = getattr(cur, direction)
+    return chain
 
 
-def _render_played_cross(area, w, si):
-    # Bones to the left of the spinner
-    for i in range(si):
-        bone = _played_dominoes[i]
-        is_double = bone[0] == bone[1]
-        div = _make_bone_div(bone[0], bone[1], horizontal=True, w=w)
-        if is_double:
-            _apply_bone_rotation(div, w)
-        if i == 0:
-            div.setAttribute("data-play-end", "left")
-            div.addEventListener("dragover", ffi.create_proxy(_on_dragover))
-            div.addEventListener("drop", ffi.create_proxy(_on_drop_played_bone))
-        area.appendChild(div)
+def _render_played_linear(area, bone, w):
+    \"\"\"Render a single non-junction bone into the play area.\"\"\"
+    is_double = bone.is_double
+    div = _make_bone_div(bone.value[0], bone.value[1], horizontal=True, w=w)
+    if is_double:
+        _apply_bone_rotation(div, w)
+    if bone.left is None:
+        div.setAttribute("data-play-end", "left")
+        div.addEventListener("dragover", ffi.create_proxy(_on_dragover))
+        div.addEventListener("drop", ffi.create_proxy(_on_drop_played_bone))
+    if bone.right is None:
+        div.setAttribute("data-play-end", "right")
+        div.addEventListener("dragover", ffi.create_proxy(_on_dragover))
+        div.addEventListener("drop", ffi.create_proxy(_on_drop_played_bone))
+    area.appendChild(div)
 
-    # Spinner junction: column of [top branch / spinner / bottom branch]
+
+def _render_played_cross(area, double_bone, w):
+    \"\"\"Render a junction for a double with up/down branches.\"\"\"
+    up_chain = _get_branch_chain(double_bone, "up")
+    down_chain = _get_branch_chain(double_bone, "down")
+    dv = str(double_bone.value[0])
+
     junc = document.createElement("div")
     junc.className = "spinner-junction"
 
-    # Bone pixel height: SVG vertical height (2*w + 6px padding) plus flex gap.
     bone_h = 2 * w + 6 + _BONE_GAP_PX
-    max_branch_h = max(len(_top_branch), len(_bottom_branch)) * bone_h
+    max_branch_h = max(len(up_chain), len(down_chain)) * bone_h
 
     top_col = document.createElement("div")
     top_col.className = "branch-col"
-    # Give both columns equal min-height so the spinner stays vertically centred.
     top_col.style.minHeight = f"{max_branch_h}px"
-    # Push bones downward (toward the spinner).
     top_col.style.justifyContent = "flex-end"
-    if _top_branch:
-        # Render outermost bone first (reversed order → tip at top of column).
-        # Bones are stored as [connector, free_end]; swap so free end faces outward (up).
-        # Doubles are landscape (perpendicular to vertical branch direction).
-        for b in reversed(_top_branch):
-            is_dbl = b[0] == b[1]
-            bd = _make_bone_div(b[1], b[0], horizontal=is_dbl, w=w)
+    if up_chain:
+        for b in reversed(up_chain):
+            is_dbl = b.is_double
+            bd = _make_bone_div(b.value[0], b.value[1], horizontal=is_dbl, w=w)
             top_col.appendChild(bd)
         fc = top_col.firstChild
-        fc.setAttribute("data-play-end", "top")
+        fc.setAttribute("data-play-end", "up")
+        fc.setAttribute("data-branch-double-val", dv)
         fc.addEventListener("dragover", ffi.create_proxy(_on_dragover))
         fc.addEventListener("drop", ffi.create_proxy(_on_drop_played_bone))
     junc.appendChild(top_col)
 
-    # Spinner bone: drop on top half → top branch, bottom half → bottom branch.
-    # No visual highlight — just a transparent drop target on the bone itself.
-    sp_bone = _played_dominoes[si]
-    sp_div = _make_bone_div(sp_bone[0], sp_bone[1], w=w)
-    sp_div.setAttribute("data-play-end", "spinner")
+    sp_div = _make_bone_div(double_bone.value[0], double_bone.value[1], w=w)
+    sp_div.setAttribute("data-play-end", "double")
+    sp_div.setAttribute("data-double-val", dv)
     sp_div.addEventListener("dragover", ffi.create_proxy(_on_dragover))
     sp_div.addEventListener("drop", ffi.create_proxy(_on_drop_spinner_bone))
     junc.appendChild(sp_div)
@@ -394,51 +545,46 @@ def _render_played_cross(area, w, si):
     bot_col = document.createElement("div")
     bot_col.className = "branch-col"
     bot_col.style.minHeight = f"{max_branch_h}px"
-    if _bottom_branch:
-        # Render closest-to-spinner bone first (forward order → connector at top, touching spinner).
-        # Doubles are landscape (perpendicular to vertical branch direction).
-        for b in _bottom_branch:
-            is_dbl = b[0] == b[1]
-            bd = _make_bone_div(b[0], b[1], horizontal=is_dbl, w=w)
+    if down_chain:
+        for b in down_chain:
+            is_dbl = b.is_double
+            bd = _make_bone_div(b.value[0], b.value[1], horizontal=is_dbl, w=w)
             bot_col.appendChild(bd)
         lc = bot_col.lastChild
-        lc.setAttribute("data-play-end", "bottom")
+        lc.setAttribute("data-play-end", "down")
+        lc.setAttribute("data-branch-double-val", dv)
         lc.addEventListener("dragover", ffi.create_proxy(_on_dragover))
         lc.addEventListener("drop", ffi.create_proxy(_on_drop_played_bone))
     junc.appendChild(bot_col)
 
     area.appendChild(junc)
 
-    # Bones to the right of the spinner
-    for i in range(si + 1, len(_played_dominoes)):
-        bone = _played_dominoes[i]
-        is_double = bone[0] == bone[1]
-        div = _make_bone_div(bone[0], bone[1], horizontal=True, w=w)
-        if is_double:
-            _apply_bone_rotation(div, w)
-        if i == len(_played_dominoes) - 1:
-            div.setAttribute("data-play-end", "right")
-            div.addEventListener("dragover", ffi.create_proxy(_on_dragover))
-            div.addEventListener("drop", ffi.create_proxy(_on_drop_played_bone))
-        area.appendChild(div)
-
 
 def _render_play_area():
     area = document.getElementById("play-area")
     area.innerHTML = ""
-    if not _played_dominoes:
+    if _played_dominoes.is_empty():
         return
     w = _compute_bone_size()
-    si = _spinner_index()
-    if si is not None and _spinner_is_surrounded():
-        _render_played_cross(area, w, si)
-    else:
-        _render_played_linear(area, w)
+    run = _played_dominoes.horizontal_run()
+    for bone in run:
+        has_junction = (bone.is_double and bone.left is not None and bone.right is not None)
+        if has_junction:
+            _render_played_cross(area, bone, w)
+        else:
+            _render_played_linear(area, bone, w)
 
 
 def _render_scores():
     document.getElementById("score-p0").textContent = str(_scores[0])
     document.getElementById("score-p1").textContent = str(_scores[1])
+    pips = _played_dominoes.playable_pips()
+    pip_el = document.getElementById("playable-pips")
+    if pip_el:
+        if pips is None:
+            pip_el.textContent = "Open: (any)"
+        else:
+            pip_el.textContent = f"Open: {tuple(sorted(pips))}"
 
 
 def _set_message(msg):
@@ -478,30 +624,37 @@ def _hand_value(hand):
 
 
 def _score_played():
-    if not _played_dominoes:
-        return 0
-    if len(_played_dominoes) == 1 and _played_dominoes[0][0] == _played_dominoes[0][1]:
-        total = _played_dominoes[0][0] * _SPINNER_MULTIPLIER
-    else:
-        lv, rv, tv, bv = _end_values()
-        total = lv + rv + tv + bv
-    return total if total % _SCORING_DIVISOR == 0 else 0
+    s = _played_dominoes.score()
+    return s if s % _SCORING_DIVISOR == 0 else 0
 
 
 def _simulate_score_after_play(bone):
-    # Return the best possible chain score after playing this bone on any valid end.
+    # Return the best possible score after playing this bone on any valid end.
     a, b = bone[0], bone[1]
-    if not _played_dominoes:
+    if _played_dominoes.is_empty():
         total = a * 2 if a == b else a + b
         return total if total % _SCORING_DIVISOR == 0 else 0
-    lv, rv, tv, bv = _end_values()
-    mult = 2 if a == b else 1
     best = 0
-    for tgt in _play_options(a, b):
-        new_end = (b if a == _ref_pip(tgt) else a) * mult
-        total = _total_for_target(tgt, new_end, lv, rv, tv, bv)
-        sc = total if total % _SCORING_DIVISOR == 0 else 0
-        best = max(best, sc)
+    for tb, td in _played_dominoes.play_options(a, b):
+        # Temporarily apply the play, score, then undo.
+        nb = _played_dominoes.apply_play(a, b, target_bone=tb, target_direction=td)
+        if nb is not None:
+            s = _played_dominoes.score()
+            sc = s if s % _SCORING_DIVISOR == 0 else 0
+            best = max(best, sc)
+            # Undo the play by unlinking the new bone.
+            if td == "left":
+                tb.left = None
+                nb.right = None
+            elif td == "right":
+                tb.right = None
+                nb.left = None
+            elif td == "up":
+                tb.up = None
+                nb.down = None
+            else:
+                tb.down = None
+                nb.up = None
     return best
 
 
@@ -512,216 +665,99 @@ def _find_bone(hand, top, bottom):
     return None
 
 
-def _end_values():
-    # Return (lv, rv, tv, bv): current chain end pip values with doubles counted twice.
-    lv = (_left_end or 0) * (2 if _played_dominoes[0][0] == _played_dominoes[0][1] else 1)
-    rv = (_right_end or 0) * (2 if _played_dominoes[-1][0] == _played_dominoes[-1][1] else 1)
-    top_dbl = _top_branch and _top_branch[-1][0] == _top_branch[-1][1]
-    tv = ((_top_end or 0) * (2 if top_dbl else 1)) if _top_branch else 0
-    bot_dbl = _bottom_branch and _bottom_branch[-1][0] == _bottom_branch[-1][1]
-    bv = ((_bottom_end or 0) * (2 if bot_dbl else 1)) if _bottom_branch else 0
-    return lv, rv, tv, bv
-
-
-def _ref_pip(tgt):
-    # Return the reference pip value for a given target end.
-    if tgt == "left":
-        return _left_end
-    if tgt == "right":
-        return _right_end
-    if tgt == "top":
-        return _top_end if _top_end is not None else _spinner_val
-    return _bottom_end if _bottom_end is not None else _spinner_val
-
-
-def _total_for_target(tgt, new_end, lv, rv, tv, bv):
-    # Return the chain end sum after placing new_end at tgt (other ends unchanged).
-    if tgt == "left":
-        return new_end + rv + tv + bv
-    if tgt == "right":
-        return lv + new_end + tv + bv
-    if tgt == "top":
-        return lv + rv + new_end + bv
-    return lv + rv + tv + new_end
-
-
-def _extend_branch(branch, end_ref, top, bottom):
-    # Extend a spinner branch by one bone. end_ref is a 1-element list [current_end].
-    # Mutates branch and end_ref[0] in-place; returns True on success.
-    ref = end_ref[0] if end_ref[0] is not None else _spinner_val
-    if top == ref:
-        branch.append([top, bottom])
-        end_ref[0] = bottom
-    elif bottom == ref:
-        branch.append([bottom, top])
-        end_ref[0] = top
-    else:
-        return False
-    return True
-
-
-def _apply_play(top, bottom, hand, target_end=None):
-    global _left_end, _right_end, _spinner_val, _top_end, _bottom_end
-    bone = _find_bone(hand, top, bottom)
-    if bone is None:
-        return False
-    # First bone: always valid, no target needed
-    if not _played_dominoes:
-        hand.remove(bone)
-        _played_dominoes.append([top, bottom])
-        _left_end = top
-        _right_end = bottom
-        if top == bottom and _spinner_val is None:
-            _spinner_val = top
-        return True
-    # Auto-detect target when not specified
-    if target_end is None:
-        opts = _play_options(top, bottom)
-        if not opts:
-            return False
-        if len(opts) > 1:
-            return False  # ambiguous; caller must specify
-        target_end = opts[0]
-    hand.remove(bone)
-    if target_end == "left":
-        if top == _left_end:
-            _played_dominoes.insert(0, [bottom, top])
-            _left_end = bottom
-        elif bottom == _left_end:
-            _played_dominoes.insert(0, [top, bottom])
-            _left_end = top
-        else:
-            hand.append(bone)
-            return False
-    elif target_end == "right":
-        if top == _right_end:
-            _played_dominoes.append([top, bottom])
-            _right_end = bottom
-        elif bottom == _right_end:
-            _played_dominoes.append([bottom, top])
-            _right_end = top
-        else:
-            hand.append(bone)
-            return False
-    elif target_end in ("top", "bottom"):
-        if _spinner_val is None or not _spinner_is_surrounded():
-            hand.append(bone)
-            return False
-        branch = _top_branch if target_end == "top" else _bottom_branch
-        end_ref = [_top_end] if target_end == "top" else [_bottom_end]
-        if not _extend_branch(branch, end_ref, top, bottom):
-            hand.append(bone)
-            return False
-        if target_end == "top":
-            _top_end = end_ref[0]
-        else:
-            _bottom_end = end_ref[0]
-    else:
-        hand.append(bone)
-        return False
-    # Record first double as spinner
-    if _spinner_val is None and top == bottom:
-        _spinner_val = top
-    return True
-
-
 def _can_play(top, bottom):
-    if not _played_dominoes:
-        return True
-    return len(_play_options(top, bottom)) > 0
+    return _played_dominoes.can_play(top, bottom)
 
 
 def _valid_plays(hand):
     return [t for t in hand if _can_play(t[0], t[1])]
 
 
-def _spinner_index():
-    # Find the spinner (the first double), identified by both halves equaling spinner_val.
-    if _spinner_val is None:
-        return None
-    for i, b in enumerate(_played_dominoes):
-        if b[0] == _spinner_val and b[1] == _spinner_val:
-            return i
-    return None
+def _is_ambiguous_play(top, bottom):
+    # Return True when the bone fits more than one placement position.
+    return len(_played_dominoes.play_options(top, bottom)) > 1
 
 
-def _spinner_is_surrounded():
-    si = _spinner_index()
-    if si is None:
+def _apply_play(top, bottom, hand, target_end=None):
+    bone = _find_bone(hand, top, bottom)
+    if bone is None:
         return False
-    return 0 < si < len(_played_dominoes) - 1
+    run = _played_dominoes.horizontal_run()
+    if target_end is not None and run:
+        if target_end == "left":
+            tb, td = run[0], "left"
+        elif target_end == "right":
+            tb, td = run[-1], "right"
+        elif target_end in ("up", "down"):
+            tb, td = None, None
+            for bo, d in _played_dominoes.open_ends():
+                if d == target_end:
+                    tb, td = bo, d
+                    break
+            if tb is None:
+                return False
+        else:
+            return False
+        nb = _played_dominoes.apply_play(top, bottom, target_bone=tb, target_direction=td)
+        if nb:
+            hand.remove(bone)
+            return True
+        return False
+    nb = _played_dominoes.apply_play(top, bottom)
+    if nb:
+        hand.remove(bone)
+        return True
+    return False
 
 
 def _play_options(top, bottom):
-    # Returns list of valid target ends for an existing chain.
+    \"\"\"Return list of direction strings for valid plays of bone [top, bottom].\"\"\"
+    if _played_dominoes.is_empty():
+        return []
     opts = []
-    can_left = _left_end is not None and (top == _left_end or bottom == _left_end)
-    can_right = _right_end is not None and (top == _right_end or bottom == _right_end)
-    if can_left and can_right and _left_end == _right_end:
-        opts.append("right")  # both ends same value - pick right (append) as canonical
-    else:
-        if can_left:
-            opts.append("left")
-        if can_right:
-            opts.append("right")
-    if _spinner_val is not None and _spinner_is_surrounded():
-        sv = _spinner_val
-        if _top_end is None:
-            if top == sv or bottom == sv:
-                opts.append("top")
-        elif top == _top_end or bottom == _top_end:
-            opts.append("top")
-        if _bottom_end is None:
-            if top == sv or bottom == sv:
-                opts.append("bottom")
-        elif top == _bottom_end or bottom == _bottom_end:
-            opts.append("bottom")
+    seen = set()
+    for _, d in _played_dominoes.play_options(top, bottom):
+        if d not in seen:
+            seen.add(d)
+            opts.append(d)
     return opts
 
 
-def _is_ambiguous_play(top, bottom):
-    # Return True when the bone fits more than one placement position.
-    return len(_play_options(top, bottom)) > 1
-
-
 def _compute_bone_size():
-    # Return the largest domino half-width (w) that fits all chain bones.
-    if not _played_dominoes:
+    if _played_dominoes.is_empty():
         return 55
+    run = _played_dominoes.horizontal_run()
     area = document.getElementById("play-area")
-    avail = int(area.clientWidth) - 20  # subtract padding
+    avail = int(area.clientWidth) - 20
     if avail <= 50:
-        avail = 650  # fallback when DOM not yet laid out
-    h_bones = sum(1 for b in _played_dominoes if b[0] != b[1])
-    v_bones = len(_played_dominoes) - h_bones
-    n = len(_played_dominoes)
+        avail = 650
+    n = len(run)
+    h_bones = sum(1 for b in run if not b.is_double)
+    v_bones = n - h_bones
     gaps = max(0, n - 1) * _BONE_GAP_PX
-    # At half-width w: horizontal bone = (2w+6) px wide, vertical = (w+6) px wide.
-    # Solve: h_bones*(2w+6) + v_bones*(w+6) + gaps <= avail
     coeff = 2 * h_bones + v_bones
     if coeff <= 0:
         return 55
     w = (avail - 6 * n - gaps) / coeff
-
-    # Height constraint for cross-chain: reduce w so spinner branches fit vertically.
-    si = _spinner_index()
-    if si is not None and _spinner_is_surrounded():
-        max_b = max(len(_top_branch), len(_bottom_branch))
-        if max_b > 0:
-            # Viewport height minus UI overhead (h1 + two hand rows + status + gaps).
-            win_h = int(document.documentElement.clientHeight)
-            avail_h = win_h - 280  # ~280px overhead
-            if avail_h > 60:
-                # bone_h = 2w + 6 + g (g = _BONE_GAP_PX)
-                # junction_h = 2*max_b*bone_h + (2w+6)
-                #            = w*(4*max_b+2) + (12+2g)*max_b + 6
-                # Solve for w: w <= (avail_h - (12+2g)*max_b - 6) / (4*max_b + 2)
-                gap = _BONE_GAP_PX
-                num = avail_h - (12 + 2 * gap) * max_b - 6
-                denom = 4 * max_b + 2
-                if denom > 0 and num > 0:
-                    w = min(w, num / denom)
-
+    # Height constraint for doubles with up/down branches.
+    all_branch_depths = [
+        max(
+            sum(1 for _ in _get_branch_chain(b, "up")),
+            sum(1 for _ in _get_branch_chain(b, "down")),
+        )
+        for b in run
+        if b.is_double and (b.up is not None or b.down is not None)
+    ]
+    max_b = max(all_branch_depths, default=0)
+    if max_b > 0:
+        win_h = int(document.documentElement.clientHeight)
+        avail_h = win_h - 280
+        if avail_h > 60:
+            gap = _BONE_GAP_PX
+            num = avail_h - (12 + 2 * gap) * max_b - 6
+            denom = 4 * max_b + 2
+            if denom > 0 and num > 0:
+                w = min(w, num / denom)
     return max(10, min(55, int(w)))
 
 
@@ -745,6 +781,7 @@ def _check_win_after_play(player_idx):
     if _scores[player_idx] >= _WIN_SCORE:
         _game_over = True
         _render_all()
+        window.playDominoSound("win")
         _set_message(
             f"{winner_name} wins the match with {_scores[player_idx]} points! "
             f"(+{bonus} pts from opponent's hand)"
@@ -761,25 +798,18 @@ def _check_win_after_play(player_idx):
 
 def _deal_new_hand():
     # Shuffle and deal a fresh set of bones, preserving match scores.
-    global _hand0, _hand1, _boneyard, _played_dominoes, _left_end, _right_end
+    global _hand0, _hand1, _boneyard
     global _current_player, _needs_boneyard_draw, _consecutive_passes, _game_num
-    global _spinner_val, _top_end, _bottom_end
     bones = [[i, j] for i in range(7) for j in range(i, 7)]
     random.shuffle(bones)
     _hand0 = [list(t) for t in bones[:7]]
     _hand1 = [list(t) for t in bones[7:14]]
     _boneyard = [list(t) for t in bones[14:]]
     _played_dominoes.clear()
-    _left_end = None
-    _right_end = None
-    _spinner_val = None
-    _top_branch.clear()
-    _bottom_branch.clear()
-    _top_end = None
-    _bottom_end = None
     _game_num += 1
     _needs_boneyard_draw = False
     _consecutive_passes = 0
+    window.playDominoSound("deal")
     first_player = _game_num % 2
     first_name = "Computer" if first_player == 1 else "You"
     goes = "goes" if first_player == 1 else "go"
@@ -820,10 +850,9 @@ def _end_stuck_game():
 
 
 # ---------------------------------------------------------------------------
-# Turn management: start_turn handles boneyard draws and switches players
+# Turn management
 # ---------------------------------------------------------------------------
 def _start_turn(player_idx, prefix=""):
-    # Begin a turn for player_idx, drawing from boneyard if necessary.
     global _current_player, _needs_boneyard_draw, _consecutive_passes
     _current_player = player_idx
     _needs_boneyard_draw = False
@@ -831,15 +860,19 @@ def _start_turn(player_idx, prefix=""):
     if _valid_plays(hand):
         _render_all()
         if player_idx == 1:
-            _set_message(prefix + "Computer's turn...")
-            _computer_play()
+            _set_message(prefix + "Computer is thinking...")
+            def _delayed_play(*_):
+                _computer_play()
+            window.setTimeout(ffi.create_proxy(_delayed_play), _COMPUTER_PLAY_DELAY_MS)
         else:
             _set_message(prefix + "Your turn: drag a domino to the play area.")
     elif len(_boneyard) > _BONEYARD_MIN:
         if player_idx == 1:
             _render_all()
             _set_message(prefix + "Computer draws from boneyard...")
-            _computer_draw_and_play()
+            def _delayed_draw(*_):
+                _computer_draw_and_play()
+            window.setTimeout(ffi.create_proxy(_delayed_draw), _COMPUTER_PLAY_DELAY_MS)
         else:
             _needs_boneyard_draw = True
             _render_all()
@@ -870,6 +903,9 @@ def _after_play(player_idx, bone_played):
     is_dbl = _is_double(bone_played)
     if scored:
         _scores[player_idx] += pts // _SCORING_DIVISOR
+        window.playDominoSound("score")
+    else:
+        window.playDominoSound("play")
     if not hand:
         # Player emptied their hand. Per racehorse rules: if the last bone was a double
         # or scored, the player must draw from the boneyard and keep playing.
@@ -923,6 +959,7 @@ def _computer_draw_and_play():
         drawn = _boneyard.pop(random.randrange(len(_boneyard)))
         _hand1.append(drawn)
         drawn_count += 1
+        window.playDominoSound("draw")
     _render_all()
     if drawn_count:
         draw_msg = f"Computer drew {drawn_count} bone(s) from the boneyard. "
@@ -930,7 +967,9 @@ def _computer_draw_and_play():
         draw_msg = ""
     if _valid_plays(_hand1):
         _set_message(draw_msg + "Computer's turn...")
-        _computer_play()
+        def _delayed_play2(*_):
+            _computer_play()
+        window.setTimeout(ffi.create_proxy(_delayed_play2), _COMPUTER_PLAY_DELAY_MS)
     else:
         global _consecutive_passes
         _consecutive_passes += 1
@@ -956,21 +995,45 @@ def _computer_play():
             t[0] + t[1],
         ),
     )
-    # Pick the best target end for this bone (highest scoring; first option as tiebreak)
-    opts = _play_options(best[0], best[1]) if _played_dominoes else []
+    opts = _play_options(best[0], best[1]) if not _played_dominoes.is_empty() else []
     tgt = opts[0] if opts else None
     if len(opts) > 1:
         a, b = best[0], best[1]
-        lv, rv, tv, bv = _end_values()
-        mult = 2 if a == b else 1
         best_sc = -1
         for o in opts:
-            ne = (b if a == _ref_pip(o) else a) * mult
-            tot = _total_for_target(o, ne, lv, rv, tv, bv)
-            sc = tot if tot % _SCORING_DIVISOR == 0 else 0
-            if sc > best_sc:
-                best_sc = sc
-                tgt = o
+            run = _played_dominoes.horizontal_run()
+            if o == "left":
+                tb, td = run[0], "left"
+            elif o == "right":
+                tb, td = run[-1], "right"
+            else:
+                tb, td = None, None
+                for bo, d in _played_dominoes.open_ends():
+                    if d == o:
+                        tb, td = bo, d
+                        break
+            if tb is None:
+                continue
+            nb = _played_dominoes.apply_play(a, b, target_bone=tb, target_direction=td)
+            if nb is not None:
+                s = _played_dominoes.score()
+                sc = s if s % _SCORING_DIVISOR == 0 else 0
+                # Undo
+                if td == "left":
+                    tb.left = None
+                    nb.right = None
+                elif td == "right":
+                    tb.right = None
+                    nb.left = None
+                elif td == "up":
+                    tb.up = None
+                    nb.down = None
+                else:
+                    tb.down = None
+                    nb.up = None
+                if sc > best_sc:
+                    best_sc = sc
+                    tgt = o
     if _apply_play(best[0], best[1], _hand1, target_end=tgt):
         _set_message(f"Computer played [{best[0]}|{best[1]}].")
         _after_play(1, best)
@@ -1018,8 +1081,8 @@ def _on_drop(event):
         return
     opts = _play_options(top, bottom)
     lr_opts = [o for o in opts if o in ("left", "right")]
-    sp_opts = [o for o in opts if o in ("top", "bottom")]
-    # Bone only fits the spinner branches - guide player to drop on the spinner bone.
+    sp_opts = [o for o in opts if o in ("up", "down")]
+    # Bone only fits the spinner branches - guide player to drop on the double bone.
     if sp_opts and not lr_opts:
         _set_message(
             f"[{top}|{bottom}] fits the spinner! Drop it on the central double bone "
@@ -1047,7 +1110,6 @@ def _on_drop(event):
 
 
 def _on_drop_spinner_bone(event):
-    # Hand bone dropped directly onto the spinner bone - use Y position to pick top/bottom.
     event.preventDefault()
     event.stopPropagation()
     if _current_player != 0 or _needs_boneyard_draw or _game_over:
@@ -1057,17 +1119,24 @@ def _on_drop_spinner_bone(event):
         return
     top_s, bottom_s = data.split(",")
     top, bottom = int(top_s), int(bottom_s)
-    # Determine top vs bottom from where on the bone the drop occurred.
+    dv = int(event.currentTarget.getAttribute("data-double-val"))
+    db = _played_dominoes.find_double_in_run(dv)
+    if db is None:
+        return
     offset_y = event.offsetY
     el_h = event.currentTarget.offsetHeight
-    target_end = "top" if offset_y < el_h / 2 else "bottom"
-    if not _can_play(top, bottom):
+    target_direction = "up" if offset_y < el_h / 2 else "down"
+    if not _played_dominoes.can_play(top, bottom):
         _set_message(f"[{top}|{bottom}] cannot be played here - try another bone.")
         return
-    if _apply_play(top, bottom, _hand0, target_end=target_end):
+    tb = _played_dominoes.find_tip(db, target_direction)
+    new_bone = _played_dominoes.apply_play(top, bottom, target_bone=tb, target_direction=target_direction)
+    if new_bone:
+        bone = _find_bone(_hand0, top, bottom)
+        _hand0.remove(bone)
         _after_play(0, [top, bottom])
     else:
-        half = "top" if target_end == "top" else "bottom"
+        half = "top" if target_direction == "up" else "bottom"
         _set_message(
             f"[{top}|{bottom}] does not fit the {half} branch. "
             f"Try dropping on the other half of the double."
@@ -1075,7 +1144,6 @@ def _on_drop_spinner_bone(event):
 
 
 def _on_drop_played_bone(event):
-    # Hand bone dropped directly onto a chain-end bone - directed placement.
     event.preventDefault()
     event.stopPropagation()
     if _current_player != 0 or _needs_boneyard_draw or _game_over:
@@ -1088,10 +1156,26 @@ def _on_drop_played_bone(event):
         return
     top_s, bottom_s = data.split(",")
     top, bottom = int(top_s), int(bottom_s)
-    if not _can_play(top, bottom):
+    if not _played_dominoes.can_play(top, bottom):
         _set_message(f"[{top}|{bottom}] cannot be played here - try another bone.")
         return
-    if _apply_play(top, bottom, _hand0, target_end=chain_end):
+    run = _played_dominoes.horizontal_run()
+    if chain_end == "left":
+        tb, td = run[0], "left"
+    elif chain_end == "right":
+        tb, td = run[-1], "right"
+    elif chain_end in ("up", "down"):
+        dv = int(event.currentTarget.getAttribute("data-branch-double-val"))
+        db = _played_dominoes.find_double_in_run(dv)
+        if db is None:
+            return
+        tb = _played_dominoes.find_tip(db, chain_end)
+        td = chain_end
+    else:
+        return
+    if _played_dominoes.apply_play(top, bottom, target_bone=tb, target_direction=td):
+        bone = _find_bone(_hand0, top, bottom)
+        _hand0.remove(bone)
         _after_play(0, [top, bottom])
     else:
         _set_message(f"[{top}|{bottom}] does not fit on the {chain_end} end.")
@@ -1112,6 +1196,7 @@ def _on_drop_boneyard_to_hand(event):
     idx = random.randrange(len(_boneyard))
     bone = _boneyard.pop(idx)
     _hand0.append(bone)
+    window.playDominoSound("draw")
     if _valid_plays(_hand0) or len(_boneyard) <= _BONEYARD_MIN:
         _needs_boneyard_draw = False
         if _valid_plays(_hand0):
@@ -1152,6 +1237,7 @@ if _new_game_btn:
 _render_all()
 document.getElementById("status-msg").innerHTML = ""
 _set_message(_raw["message"])
+
 """
 
 
@@ -1387,6 +1473,11 @@ def _build_board(soup: BeautifulSoup, body: Tag) -> None:
         row.append(val)
         sb.append(row)
 
+    pip_div = soup.new_tag("div")
+    pip_div["id"] = "playable-pips"
+    pip_div["style"] = "font-size: 0.75rem; opacity: 0.8; text-align: center;"
+    sb.append(pip_div)
+
     # Player 0 hand (bottom - human)
     p0_div = _add_tag(soup, board, "div", id="player0-hand")
     p0_div["class"] = "player-hand"
@@ -1445,6 +1536,27 @@ def build_html(state: GameState) -> str:
     facedown_script["type"] = "application/json"
     facedown_script.string = _json.dumps(_load_facedown_image_uri())
     body.append(facedown_script)
+
+    # JavaScript sound function
+    js_script = soup.new_tag("script")
+    js_script.string = """
+function playDominoSound(type) {
+    try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        o.connect(g);
+        g.connect(ctx.destination);
+        var freq = {"play": 440, "score": 660, "deal": 330, "win": 880, "draw": 220}[type] || 440;
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0.3, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        o.start(ctx.currentTime);
+        o.stop(ctx.currentTime + 0.3);
+    } catch(e) {}
+}
+"""
+    body.append(js_script)
 
     # PyScript runtime
     _add_tag(soup, body, "script", type="module", src=PYSCRIPT_JS_URL)

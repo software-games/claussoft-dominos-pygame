@@ -1,4 +1,6 @@
-from dominoes_ui_on_pyscript import (
+import re
+
+from src.main import (
     _PYSCRIPT_CODE,
     GameState,
     _load_domino_image_uris,
@@ -127,56 +129,59 @@ def test_html_scoreboard_same_width_as_boneyard() -> None:
 
 
 def test_pyscript_double_at_chain_end_scores_double() -> None:
-    """A double at the chain end has both pips counted: 3-6, 6-6 → 3+6+6=15."""
-    # Logic is extracted into _end_values(); verify the helper is present.
-    assert "_end_values" in _PYSCRIPT_CODE
-    # The _end_values helper applies * 2 for double chain ends.
-    assert "* (2 if _played_dominoes[0][0] == _played_dominoes[0][1] else 1)" in _PYSCRIPT_CODE
-    assert "* (2 if _played_dominoes[-1][0] == _played_dominoes[-1][1] else 1)" in _PYSCRIPT_CODE
+    """PlayedDominoes.score() counts doubles twice via is_double check."""
+    assert "2 if b.is_double else 1" in _PYSCRIPT_CODE
+    assert "def score" in _PYSCRIPT_CODE
 
 
-def test_pyscript_spinner_state_variables() -> None:
-    """Spinner state variables are declared in the PyScript code."""
-    for var in ("_spinner_val", "_top_branch", "_bottom_branch", "_top_end", "_bottom_end"):
-        assert var in _PYSCRIPT_CODE, f"{var} missing from _PYSCRIPT_CODE"
+def test_pyscript_played_domino_class() -> None:
+    """PlayedDomino class is defined with value and neighbor attributes."""
+    assert "class PlayedDomino:" in _PYSCRIPT_CODE
+    assert "self.left = None" in _PYSCRIPT_CODE
+    assert "self.right = None" in _PYSCRIPT_CODE
+    assert "self.up = None" in _PYSCRIPT_CODE
+    assert "self.down = None" in _PYSCRIPT_CODE
+    assert "def open_directions" in _PYSCRIPT_CODE
+    assert "def is_double" in _PYSCRIPT_CODE
+
+
+def test_pyscript_played_dominoes_class() -> None:
+    """PlayedDominoes class is defined with first_played_domino and traversal methods."""
+    assert "class PlayedDominoes:" in _PYSCRIPT_CODE
+    assert "self.first_played_domino = None" in _PYSCRIPT_CODE
+    assert "def horizontal_run" in _PYSCRIPT_CODE
+    assert "def open_ends" in _PYSCRIPT_CODE
+    assert "def playable_pips" in _PYSCRIPT_CODE
+    assert "def score" in _PYSCRIPT_CODE
+    assert "def apply_play" in _PYSCRIPT_CODE
 
 
 def test_pyscript_spinner_cross_rendering() -> None:
-    """Cross-shaped spinner rendering functions are present."""
+    """Cross-shaped junction rendering functions are present."""
     assert "_render_played_cross" in _PYSCRIPT_CODE
     assert "_render_played_linear" in _PYSCRIPT_CODE
-    # Drop zones are now the spinner bone itself (no separate placeholder boxes).
     assert "_on_drop_spinner_bone" in _PYSCRIPT_CODE
-    assert "_spinner_index" in _PYSCRIPT_CODE
-    assert "_spinner_is_surrounded" in _PYSCRIPT_CODE
+    assert "data-double-val" in _PYSCRIPT_CODE
+    assert "horizontal_run" in _PYSCRIPT_CODE
 
 
-def test_pyscript_spinner_index_requires_double() -> None:
-    """_spinner_index must match both pips to avoid confusing non-double bones."""
-    # The check must include b[1] so a [3,4] bone is not mistaken for the [3,3] spinner.
-    assert "b[0] == _spinner_val and b[1] == _spinner_val" in _PYSCRIPT_CODE
+def test_pyscript_doubles_open_up_down_when_surrounded() -> None:
+    """Doubles expose up/down directions only after both horizontal sides connected."""
+    assert "self.is_double and self.left is not None and self.right is not None" in _PYSCRIPT_CODE
 
 
-def test_pyscript_spinner_bone_direct_drop() -> None:
-    """The spinner bone itself is the drop target (no separate dashed zone)."""
-    # New handler uses offsetY to determine top vs bottom.
+def test_pyscript_double_bone_direct_drop() -> None:
+    """The double bone itself is a drop target; offsetY picks up vs down."""
     assert "_on_drop_spinner_bone" in _PYSCRIPT_CODE
     assert "offset_y" in _PYSCRIPT_CODE
     assert "el_h" in _PYSCRIPT_CODE
-    # The old separate placeholder _render_drop_zone is gone.
     assert "_render_drop_zone" not in _PYSCRIPT_CODE
-    # No dashed outline on the spinner bone.
-    assert "spinner-bone-droptarget" not in _PYSCRIPT_CODE
+    assert "data-double-val" in _PYSCRIPT_CODE
 
 
-def test_pyscript_top_branch_orientation() -> None:
-    """Top branch bones are rendered with connector-pip at bottom (facing spinner)."""
-    # Branch bones stored as [connector, free_end].
-    # For top branch (column above spinner), free_end must face UP.
-    # Doubles: horizontal=is_dbl → landscape (perpendicular to branch direction).
-    assert "_make_bone_div(b[1], b[0], horizontal=is_dbl, w=w)" in _PYSCRIPT_CODE
-    # Bottom branch also uses horizontal=is_dbl.
-    assert "_make_bone_div(b[0], b[1], horizontal=is_dbl, w=w)" in _PYSCRIPT_CODE
+def test_pyscript_branch_bone_orientation() -> None:
+    """Branch bones are rendered with correct pip orientation using value[0] and value[1]."""
+    assert "_make_bone_div(b.value[0], b.value[1], horizontal=is_dbl, w=w)" in _PYSCRIPT_CODE
 
 
 def test_pyscript_doubles_perpendicular_via_css_rotation() -> None:
@@ -223,20 +228,16 @@ def test_html_play_area_centered() -> None:
     assert "align-self: center" in html
 
 
-def test_pyscript_spinner_top_bottom_placement() -> None:
-    """Spinner top/bottom branch placement is handled in _apply_play()."""
-    # top and bottom are handled together via 'in ("top", "bottom")' after refactor.
-    assert 'target_end == "top"' in _PYSCRIPT_CODE or 'target_end in ("top", "bottom")' in _PYSCRIPT_CODE
-    assert "_extend_branch" in _PYSCRIPT_CODE  # shared helper for branch placement
-    assert "_top_branch" in _PYSCRIPT_CODE
-    assert "_bottom_branch" in _PYSCRIPT_CODE
+def test_pyscript_up_down_branch_placement() -> None:
+    """Up/down branch placement is handled via find_tip and apply_play."""
+    assert 'target_direction = "up"' in _PYSCRIPT_CODE or '"up"' in _PYSCRIPT_CODE
+    assert "find_tip" in _PYSCRIPT_CODE
+    assert "_played_dominoes.apply_play" in _PYSCRIPT_CODE
 
 
-def test_pyscript_spinner_cleared_on_new_hand() -> None:
-    """Spinner state is cleared when a new hand is dealt."""
-    assert "_spinner_val = None" in _PYSCRIPT_CODE
-    assert "_top_branch.clear()" in _PYSCRIPT_CODE
-    assert "_bottom_branch.clear()" in _PYSCRIPT_CODE
+def test_pyscript_board_cleared_on_new_hand() -> None:
+    """Board state is cleared when a new hand is dealt."""
+    assert "_played_dominoes.clear()" in _PYSCRIPT_CODE
 
 
 def test_pyscript_compute_bone_size_height_constraint() -> None:
@@ -407,11 +408,9 @@ def test_html_embeds_domino_image_uris() -> None:
 
 
 def test_pyscript_played_dominoes_not_chain() -> None:
-    """The play area data structure is named _played_dominoes, not _chain."""
-    import re  # noqa: PLC0415
-
+    """The play area data structure is named _played_dominoes (a PlayedDominoes instance), not _chain."""
     assert "_played_dominoes" in _PYSCRIPT_CODE
-    # Old name must not appear as a standalone identifier (word-boundary check)
+    assert "PlayedDominoes" in _PYSCRIPT_CODE
     assert re.search(r"\b_chain\b", _PYSCRIPT_CODE) is None
     assert "play_chain" not in _PYSCRIPT_CODE
 
@@ -423,3 +422,21 @@ def test_pyscript_image_based_svg_uses_svgimage() -> None:
     # Old hand-drawn approach (rect/circle for pips) is gone
     assert "_PIP_LOCATIONS" not in _PYSCRIPT_CODE
     assert "_half_svg" not in _PYSCRIPT_CODE
+
+
+def test_pyscript_playable_pips_displayed() -> None:
+    """Playable pip numbers are displayed under the score."""
+    assert "playable-pips" in _PYSCRIPT_CODE
+    assert "playable_pips" in _PYSCRIPT_CODE
+    assert "Open:" in _PYSCRIPT_CODE
+
+
+def test_pyscript_computer_play_delay() -> None:
+    """Computer play delay constant and setTimeout are present."""
+    assert "_COMPUTER_PLAY_DELAY_MS" in _PYSCRIPT_CODE
+    assert "window.setTimeout" in _PYSCRIPT_CODE
+
+
+def test_pyscript_sounds_present() -> None:
+    """Sound function calls are present for game events."""
+    assert "playDominoSound" in _PYSCRIPT_CODE
