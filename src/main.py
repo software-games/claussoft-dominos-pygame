@@ -585,6 +585,17 @@ def _render_scores():
             pip_el.textContent = "Open: (any)"
         else:
             pip_el.textContent = f"Open: {tuple(sorted(pips))}"
+    score_el = document.getElementById("board-score")
+    if score_el:
+        score_el.textContent = f"Score: {_played_dominoes.score()}"
+    can_play_el = document.getElementById("can-play")
+    if can_play_el:
+        playable = [b for b in _hand0 if _can_play(b[0], b[1])]
+        can_play_el.textContent = f"Can play: {len(playable)} of {len(_hand0)}"
+    opts_el = document.getElementById("play-options")
+    if opts_el:
+        all_dirs = {d for b in _hand0 for _, d in _played_dominoes.play_options(b[0], b[1])}
+        opts_el.textContent = f"Options: {sorted(all_dirs)}" if all_dirs else "Options: (first play)"
 
 
 def _set_message(msg):
@@ -1477,6 +1488,12 @@ def _build_board(soup: BeautifulSoup, body: Tag) -> None:
     pip_div["id"] = "playable-pips"
     pip_div["style"] = "font-size: 0.75rem; opacity: 0.8; text-align: center;"
     sb.append(pip_div)
+
+    for el_id in ("board-score", "can-play", "play-options"):
+        el = soup.new_tag("div")
+        el["id"] = el_id
+        el["style"] = "font-size: 0.75rem; opacity: 0.8; text-align: center;"
+        sb.append(el)
 
     # Player 0 hand (bottom - human)
     p0_div = _add_tag(soup, board, "div", id="player0-hand")
