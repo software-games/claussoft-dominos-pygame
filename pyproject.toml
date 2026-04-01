@@ -2,16 +2,24 @@
 name = "claussoft-dominos"
 version = "0.1.0"
 requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
 dependencies = [
-    "beautifulsoup4",
-    "httpx",
-    "pillow",
-    "pydantic",
+  "beautifulsoup4",
+  "httpx",
+  "pillow",
+  "pydantic",
 ]
 
 [dependency-groups]
 test = [
-    "pytest",
+  "pytest",
 ]
 
 [tool.ruff]
