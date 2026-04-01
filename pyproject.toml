@@ -23,11 +23,11 @@ test = [
 ]
 
 [tool.ruff]
-target-version = "py39"
 line-length = 108
 lint.select = [
   "A",     # flake8-builtins
   "AIR",   # Airflow
+  "ANN",   # flake8-annotations
   "ARG",   # flake8-unused-arguments
   "ASYNC", # flake8-async
   "B",     # flake8-bugbear
@@ -53,6 +53,7 @@ lint.select = [
   "INT",   # flake8-gettext
   "ISC",   # flake8-implicit-str-concat
   "LOG",   # flake8-logging
+  "N",     # pep8-naming
   "NPY",   # NumPy-specific rules
   "PD",    # pandas-vet
   "PERF",  # Perflint
@@ -77,20 +78,18 @@ lint.select = [
   "UP",    # pyupgrade
   "W",     # pycodestyle
   "YTT",   # flake8-2020
-  # "ANN",  # flake8-annotations
   # "COM",  # flake8-commas
   # "CPY",  # flake8-copyright
   # "D",    # pydocstyle
   # "DOC",  # pydoclint
   # "ERA",  # eradicate
-  # "N",    # pep8-naming
   # "Q",    # flake8-quotes
   # "T20",  # flake8-print
 ]
-# ignore = []
-lint.per-file-ignores."__init__.py" = [ "E402" ]
+# lint.per-file-ignores."__init__.py" = [ "E402" ]
 lint.per-file-ignores."dominoes_svg.py" = [ "S101" ]
 lint.per-file-ignores."tests/*" = [ "S101" ]
+lint.per-file-ignores."tests/Z_test_domino.py" = [ "N999" ]
 lint.pylint.allow-magic-value-types = [ "int", "str" ]
 
 [tool.codespell]
