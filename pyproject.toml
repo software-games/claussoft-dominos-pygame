@@ -11,10 +11,9 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-  "beautifulsoup4",
-  "httpx",
   "pillow",
   "pydantic",
+  "pygame-ce",
 ]
 optional-dependencies.test = [
   "pytest",
@@ -91,9 +90,11 @@ lint.select = [
 ]
 # lint.per-file-ignores."__init__.py" = [ "E402" ]
 lint.per-file-ignores."dominoes_svg.py" = [ "S101" ]
+lint.per-file-ignores."src/main.py" = [ "FBT003", "PLW0602", "PLW0603", "S101", "S311" ]
 lint.per-file-ignores."tests/*" = [ "S101" ]
 lint.per-file-ignores."tests/Z_test_domino.py" = [ "N999" ]
 lint.pylint.allow-magic-value-types = [ "int", "str" ]
+lint.pylint.max-args = 8
 
 [tool.codespell]
 ignore-words-list = "agains"

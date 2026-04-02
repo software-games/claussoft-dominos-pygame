@@ -11,30 +11,26 @@ Rules:
 * The player who has no dominoes gets all points on the other player's dominoes // 5
 * First player to 30 points wins the match
 
-$ __python3 DominoWorld.py__  # To play a text game on the terminal against the computer
+## Running the game
+
 ```
-Player 1's hand: 1 [[6, 6]]
-================================
-                         4     3
-[6,2][2,5][5,6][6,1][1,4]-[4,3]-
-                         4     3
-                         4
-                         -
-                         5
-================================
-Playable: [3, 4, 5, 6], Value: 17
-RECAP:playARun() run length: 6
-1 Playing [4, 4] on [1, 4] is a double, go again...
-2 Playing [2, 5] on [5, 6] 2.0 points, go again...
-3 Playing [4, 3] on [4, 4] 1.0 points, go again...
-4 Playing [4, 5] on [4, 4] 2.0 points, go again...
-5 Playing [3, 3] on [4, 3] is a double, go again...
-6 Playing [6, 2] on [2, 5]
-Player 1 has 1 dominoes, 9.0 points, 10 go agains, 1 hands and 0 games won.
+uv run src/main.py
 ```
 
-$ __python3 tkDomino.py__  # To see the start of a [tkinter](https://docs.python.org/3/library/tk.html)-based ui
-![tkDomino.py.png](images/tkDomino.py.png)
+This opens a **PyGame-CE** window.  Dominoes are drawn programmatically.
+Click a bone in your hand to select it (gold border), then click one of the
+green arrow indicators that appear in the play area to place it.  When you
+have no playable bones the boneyard panel is highlighted — click any
+face-down bone there to draw.
 
-$ __python3 drawDomino.py__  # To see the layout of played Dominoes in the tkinter ui
-![drawDomino.py.png](images/drawDomino.py.png)
+Requires Python ≥ 3.13.  Dependencies are declared via [PEP 723](https://peps.python.org/pep-0723/) inline metadata and installed automatically by `uv run`.
+
+## Running the tests
+
+```
+pytest
+```
+
+The test suite covers game-state serialization, the board data structures
+(`PlayedDomino` / `PlayedDominoes`), scoring logic, and the bone-size
+height-constraint formula.
