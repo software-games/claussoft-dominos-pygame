@@ -41,7 +41,7 @@ WINDOW_W = 1200
 WINDOW_H = 800
 FPS = 30
 HEADER_H = 36
-CPU_HAND_H = 64
+CPU_HAND_H = 114
 PLAYER_HAND_H = 114
 STATUS_H = 84
 BONEYARD_W = 148
@@ -136,8 +136,22 @@ class PlayedDomino:
         return self.value[0] if direction in ("left", "up") else self.value[1]
 
     def open_directions(self) -> list[str]:
-        """Return the directions where a new bone can be attached."""
+        """Return the directions where a new bone can be attached.
+
+        Bones placed in a vertical branch (connected only via up/down pointers,
+        with left and right both None) expose only their one open end direction
+        (up or down).  Horizontal-run bones expose left and/or right; junction
+        doubles additionally expose up/down after both horizontal sides are filled.
+        """
         dirs: list[str] = []
+        # Vertical branch bone: connected only through up/down, not left/right.
+        if self.left is None and self.right is None and (self.up is not None or self.down is not None):
+            if self.up is None:
+                dirs.append("up")
+            if self.down is None:
+                dirs.append("down")
+            return dirs
+        # Horizontal-run bone.
         if self.left is None:
             dirs.append("left")
         if self.right is None:
@@ -217,8 +231,9 @@ class PlayedDominoes:
             return run[0].value[0] * 2
         total = 0
         for b, d in self.open_ends():
-            # Empty spinner vertical branches don't score until a bone is placed there.
-            if d in ("up", "down") and getattr(b, d) is None:
+            # Empty spinner (junction) vertical branches don't score until a bone
+            # is placed there.  A junction has both left and right connected.
+            if d in ("up", "down") and getattr(b, d) is None and b.left is not None and b.right is not None:
                 continue
             total += b.pip_at(d) * (2 if b.is_double else 1)
         return total
@@ -554,7 +569,8 @@ def _compute_bone_size(area_w: int, area_h: int) -> int:
     coeff = 2 * h_bones + v_bones
     if coeff <= 0:
         return BONE_W
-    w = (avail - 6 * n - gaps) / coeff
+    # portrait bone width = w + 6 (w + 2*pad), landscape = 2*w + 10 (2*w + div + 2*pad)
+    w = (avail - 6 * v_bones - 10 * h_bones - gaps) / coeff
     # Height constraint for doubles with up/down branches.
     all_branch_depths = [
         max(
@@ -753,6 +769,7 @@ def _after_play(player_idx: int, bone_played: list[int]) -> None:
     is_dbl = _is_double(bone_played)
     if scored:
         _scores[player_idx] += pts // _SCORING_DIVISOR
+    _print_board_state(player_idx, bone_played)
     if not hand:
         _after_play_hand_empty(player_idx, pts, scored=scored, is_dbl=is_dbl)
         return
@@ -878,6 +895,112 @@ def _computer_play() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Text board dump (printed to stdout after every play)
+# ---------------------------------------------------------------------------
+
+
+def _make_sparse_row(positions: dict[int, str], width: int) -> str:
+    """Return a string of length ``width`` with characters at specified columns."""
+    row = [" "] * width
+    for col, ch in positions.items():
+        if 0 <= col < width:
+            row[col] = ch
+    return "".join(row).rstrip()
+
+
+def _branch_section_lines(
+    doubles_with_col: list[tuple[PlayedDomino, int]],
+    direction: str,
+    run_w: int,
+) -> list[str]:
+    """Return text rows for all branch bones in ``direction`` (up or down).
+
+    Each bone contributes three rows: top pip, ``-`` divider, bottom pip.
+    For ``"up"`` branches the farthest bone (deepest index) is emitted first
+    so the result reads top-to-bottom correctly.
+    """
+    # Cache chains once to avoid repeated linked-list traversal.
+    chains: list[tuple[int, list[PlayedDomino]]] = [
+        (col, _get_branch_chain(b, direction)) for b, col in doubles_with_col
+    ]
+    max_depth = max((len(ch) for _, ch in chains), default=0)
+    if max_depth == 0:
+        return []
+    depth_range = range(max_depth - 1, -1, -1) if direction == "up" else range(max_depth)
+    lines: list[str] = []
+    for depth in depth_range:
+        top_pips: dict[int, str] = {}
+        divs: dict[int, str] = {}
+        bot_pips: dict[int, str] = {}
+        for col, chain in chains:
+            if depth < len(chain):
+                bone = chain[depth]
+                top_pips[col] = str(bone.value[0])
+                divs[col] = "-"
+                bot_pips[col] = str(bone.value[1])
+        lines.extend(
+            [
+                _make_sparse_row(top_pips, run_w),
+                _make_sparse_row(divs, run_w),
+                _make_sparse_row(bot_pips, run_w),
+            ]
+        )
+    return lines
+
+
+def _board_text_lines() -> list[str]:
+    """Return the board as a list of text lines.
+
+    Each non-double in the horizontal run is rendered as ``[a,b]`` (5 chars).
+    Each double is rendered as ``+`` (1 char) and its pip value is shown on
+    the rows immediately above and below the run.  Vertical branch bones are
+    shown beneath (or above) those pip rows, three lines per bone (top pip,
+    ``-`` divider, bottom pip).
+    """
+    if _played_dominoes.is_empty():
+        return ["(empty board)"]
+    run = _played_dominoes.horizontal_run()
+
+    # Compute char-column offset for each bone in the run.
+    offsets: list[int] = []
+    cur_x = 0
+    for b in run:
+        offsets.append(cur_x)
+        cur_x += 1 if b.is_double else 5
+    run_w = max(cur_x, 1)
+
+    doubles_with_col: list[tuple[PlayedDomino, int]] = [
+        (b, offsets[i]) for i, b in enumerate(run) if b.is_double
+    ]
+
+    pip_row = _make_sparse_row({col: str(b.value[0]) for b, col in doubles_with_col}, run_w)
+    run_line = "".join("+" if b.is_double else f"[{b.value[0]},{b.value[1]}]" for b in run)
+
+    lines: list[str] = _branch_section_lines(doubles_with_col, "up", run_w)
+    if doubles_with_col:
+        lines.append(pip_row)
+    lines.append(run_line)
+    if doubles_with_col:
+        lines.append(pip_row)
+    lines.extend(_branch_section_lines(doubles_with_col, "down", run_w))
+    return lines
+
+
+def _print_board_state(player_idx: int, bone_played: list[int]) -> None:
+    """Print the board state to stdout after a bone is played."""
+    hand = _hand0 if player_idx == 0 else _hand1
+    player_name = "Human" if player_idx == 0 else "Computer"
+    print(f"{player_name} played {bone_played}, hand: {len(hand)} {hand}")
+    print("=" * 32)
+    for line in _board_text_lines():
+        print(line)
+    print("=" * 32)
+    pips = _played_dominoes.playable_pips()
+    pip_text = "(any)" if pips is None else str(sorted(pips))
+    print(f"Playable: {pip_text}, Value: {_played_dominoes.score()}")
+
+
+# ---------------------------------------------------------------------------
 # Rendering helpers
 # ---------------------------------------------------------------------------
 
@@ -921,17 +1044,18 @@ def _render_cpu_hand(screen: pygame.Surface, font: pygame.font.Font, rect: pygam
     """Render the computer's face-down hand at the top."""
     _draw_panel(screen, rect)
     count_txt = f"Computer's hand ({len(_hand1)} bones)"
-    _blit_label(screen, font, count_txt, rect.x + 6, rect.y + 4)
+    lbl = font.render(count_txt, True, TEXT_COLOR)
+    screen.blit(lbl, (rect.centerx - lbl.get_width() // 2, rect.y + 4))
     if not _hand1:
         return
     bw = BONE_W
-    surf_w = 2 * bw + 10
-    surf_h = bw + 6
+    surf_w = bw + 6  # portrait width
+    surf_h = 2 * bw + 10  # portrait height
     total_w = len(_hand1) * surf_w + (len(_hand1) - 1) * _BONE_GAP_PX
     bx = rect.x + (rect.width - total_w) // 2
-    by = rect.y + (rect.height - surf_h) // 2 + 6
+    by = rect.y + (rect.height - surf_h) // 2 + 8
     for _ in _hand1:
-        surf = _make_facedown_surface(bw, horizontal=True, skin=_active_facedown)
+        surf = _make_facedown_surface(bw, horizontal=False, skin=_active_facedown)
         screen.blit(surf, (bx, by))
         bx += surf_w + _BONE_GAP_PX
 
@@ -944,7 +1068,9 @@ def _render_boneyard(
 ) -> None:
     """Render the boneyard panel."""
     _draw_panel(screen, rect, highlight=_needs_boneyard_draw)
-    _blit_label(screen, font, f"Boneyard ({len(_boneyard)})", rect.x + 6, rect.y + 4)
+    lbl_txt = f"Boneyard ({len(_boneyard)})"
+    lbl = font.render(lbl_txt, True, TEXT_COLOR)
+    screen.blit(lbl, (rect.centerx - lbl.get_width() // 2, rect.y + 4))
     if not _boneyard:
         _blit_label(screen, font, "(empty)", rect.x + 6, rect.y + 22)
         return
@@ -971,6 +1097,9 @@ def _render_boneyard(
 def _compute_run_layout(run: list[PlayedDomino], w: int) -> list[tuple[PlayedDomino, int, bool]]:
     """Compute (bone, x_offset_from_run_start, is_landscape) for each run bone.
 
+    Doubles are always rendered portrait (perpendicular to the run) so they
+    visually appear rotated 90 degrees from the surrounding landscape bones.
+
     Args:
         run: the horizontal run of PlayedDomino objects.
         w: bone half-size in pixels.
@@ -981,8 +1110,7 @@ def _compute_run_layout(run: list[PlayedDomino], w: int) -> list[tuple[PlayedDom
     layout: list[tuple[PlayedDomino, int, bool]] = []
     cur_x = 0
     for b in run:
-        has_junction = b.is_double and b.left is not None and b.right is not None
-        is_landscape = not has_junction
+        is_landscape = not b.is_double  # doubles are always portrait (perpendicular)
         bw = landscape_w if is_landscape else portrait_w
         layout.append((b, cur_x, is_landscape))
         cur_x += bw + _BONE_GAP_PX
@@ -1144,13 +1272,9 @@ def _render_player_hand(
 ) -> None:
     """Render the human player's hand."""
     _draw_panel(screen, rect)
-    _blit_label(
-        screen,
-        font,
-        "Your hand  (click a bone, then click an arrow in the play area)",
-        rect.x + 6,
-        rect.y + 2,
-    )
+    hand_lbl_txt = "Your hand  (click a bone, then click an arrow in the play area)"
+    hand_lbl = font.render(hand_lbl_txt, True, TEXT_COLOR)
+    screen.blit(hand_lbl, (rect.centerx - hand_lbl.get_width() // 2, rect.y + 2))
     if not _hand0:
         _blit_label(screen, font, "(empty)", rect.x + 8, rect.y + 22)
         return
@@ -1207,8 +1331,8 @@ def _render_all(screen: pygame.Surface, font_sm: pygame.font.Font, font_lg: pyga
     sw, sh = screen.get_size()
 
     header_rect = pygame.Rect(0, 0, sw, HEADER_H)
-    cpu_rect = pygame.Rect(0, HEADER_H + GAP, sw, CPU_HAND_H)
-    mid_y = HEADER_H + CPU_HAND_H + 2 * GAP
+    cpu_rect = pygame.Rect(0, HEADER_H, sw, CPU_HAND_H)
+    mid_y = HEADER_H + CPU_HAND_H + GAP
     mid_h = sh - mid_y - PLAYER_HAND_H - STATUS_H - 3 * GAP
     boneyard_rect = pygame.Rect(GAP, mid_y, BONEYARD_W, mid_h)
     play_rect = pygame.Rect(
