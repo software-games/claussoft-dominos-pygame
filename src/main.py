@@ -503,9 +503,14 @@ def _simulate_score_after_play(bone: list[int]) -> int:
     return best
 
 
+def _bones_match(bone: list[int], top: int, bottom: int) -> bool:
+    """Return True when bone matches [top, bottom] in either orientation."""
+    return bone in ([top, bottom], [bottom, top])
+
+
 def _find_bone(hand: list[list[int]], top: int, bottom: int) -> list[int] | None:
     for bone in hand:
-        if bone in ([top, bottom], [bottom, top]):
+        if _bones_match(bone, top, bottom):
             return bone
     return None
 
@@ -1157,9 +1162,7 @@ def _render_player_hand(
     by = rect.y + (rect.height - surf_h) // 2 + 8
     is_human_turn = _current_player == 0 and not _game_over and not _needs_boneyard_draw
     for bone in _hand0:
-        is_sel = _selected_bone is not None and (
-            _selected_bone == bone or _selected_bone == [bone[1], bone[0]]
-        )
+        is_sel = _selected_bone is not None and _bones_match(_selected_bone, bone[0], bone[1])
         surf = _make_domino_surface(bone[0], bone[1], bw, selected=is_sel)
         screen.blit(surf, (bx, by))
         if is_human_turn:
@@ -1296,7 +1299,7 @@ def _dispatch_click_action(action: str, data: dict[str, object]) -> None:
         bone = data["bone"]
         if not isinstance(bone, list):
             return
-        if _selected_bone is not None and (_selected_bone == bone or _selected_bone == [bone[1], bone[0]]):
+        if _selected_bone is not None and _bones_match(_selected_bone, bone[0], bone[1]):
             _selected_bone = None  # deselect on second click
         else:
             _selected_bone = bone
