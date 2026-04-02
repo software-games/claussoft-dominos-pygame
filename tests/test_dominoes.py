@@ -5,8 +5,10 @@ from src.main import (
     GameState,
     PlayedDomino,
     PlayedDominoes,
+    _board_text_lines,
     _compute_bone_size,
     _get_branch_chain,
+    _played_dominoes,
     all_domino_bones,
     deal_game,
 )
@@ -297,3 +299,134 @@ def test_play_area_score_sequence(
         assert pd.score() == scores[i + 1], (
             f"After playing {dom} (step {i + 1}), expected score {scores[i + 1]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# open_directions - vertical branch bones
+# ---------------------------------------------------------------------------
+
+
+def test_open_directions_vertical_branch_up() -> None:
+    """A bone placed in the up branch only exposes its 'up' open end."""
+    spinner = PlayedDomino(4, 4)
+    spinner.left = PlayedDomino(1, 4)
+    spinner.right = PlayedDomino(4, 2)
+    branch = PlayedDomino(4, 5)  # placed going up from spinner
+    branch.down = spinner
+    spinner.up = branch
+    assert branch.open_directions() == ["up"]
+
+
+def test_open_directions_vertical_branch_down() -> None:
+    """A bone placed in the down branch only exposes its 'down' open end."""
+    spinner = PlayedDomino(4, 4)
+    spinner.left = PlayedDomino(1, 4)
+    spinner.right = PlayedDomino(4, 2)
+    branch = PlayedDomino(4, 3)  # placed going down from spinner
+    branch.up = spinner
+    spinner.down = branch
+    assert branch.open_directions() == ["down"]
+
+
+def test_open_directions_double_in_branch_no_sub_branches() -> None:
+    """A double in the vertical branch does not expose left/right sub-branches."""
+    spinner = PlayedDomino(3, 3)
+    spinner.left = PlayedDomino(0, 3)
+    spinner.right = PlayedDomino(3, 1)
+    dbl_branch = PlayedDomino(3, 3)  # double in the down branch
+    dbl_branch.up = spinner
+    spinner.down = dbl_branch
+    dirs = dbl_branch.open_directions()
+    assert "left" not in dirs
+    assert "right" not in dirs
+    assert "down" in dirs
+
+
+# ---------------------------------------------------------------------------
+# score() - vertical branch tips
+# ---------------------------------------------------------------------------
+
+
+def test_score_with_branch_bone() -> None:
+    """A branch tip bone is correctly included in the board score."""
+    pd = PlayedDominoes()
+    # Build: [1,4] -- [4,4] -- [4,2]  with [4,5] hanging below [4,4]
+    pd.apply_play(4, 4)
+    dbl = pd.horizontal_run()[0]
+    pd.apply_play(1, 4, target_bone=dbl, target_direction="left")
+    pd.apply_play(4, 2, target_bone=dbl, target_direction="right")
+    # Now the spinner [4,4] has both sides filled; place a branch bone below it.
+    pd.apply_play(4, 5, target_bone=dbl, target_direction="down")
+    # Open ends: [1,4] left pip=1, [4,2] right pip=2, branch [?,5] down pip=5.
+    # Score = 1 + 2 + 5 = 8.
+    assert pd.score() == 8
+
+
+def test_score_branch_double_counts_twice() -> None:
+    """A double at the tip of a branch counts 2x its pip value."""
+    pd = PlayedDominoes()
+    pd.apply_play(3, 3)
+    dbl = pd.horizontal_run()[0]
+    pd.apply_play(0, 3, target_bone=dbl, target_direction="left")
+    pd.apply_play(3, 1, target_bone=dbl, target_direction="right")
+    # Place [3,3] double in the down branch.
+    pd.apply_play(3, 3, target_bone=dbl, target_direction="down")
+    # Open ends: left pip=0, right pip=1, branch double pip=3 (counts twice).
+    # Score = 0 + 1 + 3*2 = 7.
+    assert pd.score() == 7
+
+
+def test_score_empty_spinner_branches_not_counted() -> None:
+    """Empty vertical branches on a junction double are excluded from the score."""
+    pd = PlayedDominoes()
+    pd.apply_play(5, 5)
+    dbl = pd.horizontal_run()[0]
+    pd.apply_play(0, 5, target_bone=dbl, target_direction="left")
+    pd.apply_play(5, 1, target_bone=dbl, target_direction="right")
+    # Spinner is now a junction; up/down are open but empty - should not score.
+    # Open ends: left=0, right=1; spinner's empty branches skipped.
+    # Score = 0 + 1 = 1.
+    assert pd.score() == 1
+
+
+# ---------------------------------------------------------------------------
+# _board_text_lines
+# ---------------------------------------------------------------------------
+
+
+def test_board_text_lines_empty() -> None:
+    _played_dominoes.clear()
+    lines = _board_text_lines()
+    assert lines == ["(empty board)"]
+
+
+def test_board_text_lines_single_non_double(monkeypatch: pytest.MonkeyPatch) -> None:
+    pd = PlayedDominoes()
+    pd.apply_play(3, 4)
+    monkeypatch.setattr(_main_module, "_played_dominoes", pd)
+    lines = _board_text_lines()
+    assert any("[3,4]" in ln for ln in lines)
+
+
+def test_board_text_lines_double_shown_as_plus(monkeypatch: pytest.MonkeyPatch) -> None:
+    pd = PlayedDominoes()
+    pd.apply_play(6, 6)
+    monkeypatch.setattr(_main_module, "_played_dominoes", pd)
+    lines = _board_text_lines()
+    run_line = next(ln for ln in lines if "+" in ln or "[" in ln)
+    assert "+" in run_line
+    assert "[6,6]" not in run_line
+
+
+def test_board_text_lines_branch_bone_shown(monkeypatch: pytest.MonkeyPatch) -> None:
+    pd = PlayedDominoes()
+    pd.apply_play(4, 4)
+    dbl = pd.horizontal_run()[0]
+    pd.apply_play(1, 4, target_bone=dbl, target_direction="left")
+    pd.apply_play(4, 2, target_bone=dbl, target_direction="right")
+    pd.apply_play(4, 5, target_bone=dbl, target_direction="down")
+    monkeypatch.setattr(_main_module, "_played_dominoes", pd)
+    lines = _board_text_lines()
+    all_text = "\n".join(lines)
+    # The branch bone value[1]=5 must appear somewhere below the run line.
+    assert "5" in all_text
