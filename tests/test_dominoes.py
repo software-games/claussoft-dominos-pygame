@@ -430,3 +430,25 @@ def test_board_text_lines_branch_bone_shown(monkeypatch: pytest.MonkeyPatch) -> 
     all_text = "\n".join(lines)
     # The branch bone value[1]=5 must appear somewhere below the run line.
     assert "5" in all_text
+
+
+def test_computer_play_on_empty_board_no_indexerror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: computer playing the first bone must not raise IndexError.
+
+    When the computer is the first player, the board is empty and
+    ``_play_options`` returns ``[]``. The direction target must be ``None``
+    (untargeted first play) rather than indexing into the empty ``opts`` list.
+    See software-games/claussoft-dominos-pygame#3.
+    """
+    pd = PlayedDominoes()
+    monkeypatch.setattr(_main_module, "_played_dominoes", pd)
+    monkeypatch.setattr(_main_module, "_hand1", [[3, 4]])
+    # Isolate the first-play placement from post-play scheduling/turn logic.
+    monkeypatch.setattr(_main_module, "_after_play", lambda *_a, **_k: None)
+
+    _main_module._computer_play()  # noqa: SLF001 -- must not raise
+
+    assert not pd.is_empty()
+    assert _main_module._hand1 == []  # noqa: SLF001

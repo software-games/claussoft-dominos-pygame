@@ -885,7 +885,12 @@ def _computer_play() -> None:
         ),
     )
     opts = _play_options(best[0], best[1]) if not _played_dominoes.is_empty() else []
-    tgt = opts[0] if len(opts) <= 1 else _best_direction_for(best[0], best[1], opts)
+    if not opts:
+        tgt = None
+    elif len(opts) == 1:
+        tgt = opts[0]
+    else:
+        tgt = _best_direction_for(best[0], best[1], opts)
     if _apply_play_to_hand(best[0], best[1], _hand1, target_end=tgt):
         _set_message(f"Computer played [{best[0]}|{best[1]}].")
         _after_play(1, best)
